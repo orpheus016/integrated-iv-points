@@ -1,0 +1,5 @@
+Condition,N samples,Mean voltage (V),Plateau std (V),CV (%),SNR (dB),Plateau start sample
+HF:DI 1:10 (Fresh),510,0.953417,0.001393,0.1461,56.71,357
+HF:DI 1:20,227,0.067708,0.019950,29.4646,10.61,158
+HF:DI 1:10 (7-day oxide growth),324,0.061268,0.196493,320.7086,-10.12,226
+No HF (oxide layer),313,0.174700,0.196879,112.6956,-1.04,219

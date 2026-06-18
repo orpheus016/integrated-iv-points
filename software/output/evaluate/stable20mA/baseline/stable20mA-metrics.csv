@@ -1,0 +1,2 @@
+backbone,decided_snapshot,decided_timestamp,decided_voltage,decided_current_mA,decided_resistance,decided_std_dev,decided_stage,rmse,mae,maxabs,num_snapshots
+baseline,*,2.460000,0.08238429,20.00000000,4.11921470,0.00000095,,2.7755575615628914e-17,2.7755575615628914e-17,2.7755575615628914e-17,1
