@@ -12,7 +12,14 @@ from style import (
 from pages.wafer_map_widget import WaferMapWidget
 from measurement import DEFAULT_TEMP_C, calculate_doping
 
-import random 
+import random
+
+try:
+    from software.scripts.integrate import FrontendBridge
+    from software.config.config import SimulationConfig
+    _BACKEND_AVAILABLE = True
+except ImportError:
+    _BACKEND_AVAILABLE = False
 
 class InfoCard(QFrame):
     def __init__(self, title, unit):
@@ -115,6 +122,19 @@ class LoadingPage(QWidget):
         self._manual_mode = False
         self._serial_reader = None
         self._waiting_for_probe_contact = True
+
+        # Backend VI-stability bridge -- does NOT open any serial port.
+        # Receives data pushed from Qt signal handlers and runs the backbone
+        # (BOCD by default) to find a stable Snapshot during each stream window.
+        if _BACKEND_AVAILABLE:
+            self._bridge = FrontendBridge(
+                backbone_name="bocd",
+                sim_config=SimulationConfig(),
+                output_dir="software/output/ads1256",
+            )
+        else:
+            self._bridge = None
+
         self._build_ui()
 
     def _build_ui(self):
@@ -417,6 +437,13 @@ class LoadingPage(QWidget):
         self.sig.set_value("--")
         self.dop.set_value("--")
         self._update_points_info()
+        # Notify the backend bridge that a new measurement stream has started.
+        # This resets the backbone and filters so each probe contact is independent.
+        if self._bridge is not None:
+            try:
+                self._bridge.on_stream_start()
+            except Exception:
+                pass
 
     def on_voltage_received(self, voltage_v: float):
         try:
@@ -424,7 +451,7 @@ class LoadingPage(QWidget):
             self.volt.set_value(f"{self._stream_voltage_v:.3f}")
         except Exception:
             pass
- 
+        self._try_push_to_bridge()
 
     def on_current_received(self, current_a: float):
         """Update the live current reading during a measurement stream."""
@@ -433,14 +460,47 @@ class LoadingPage(QWidget):
             self.curr.set_value(f"{self._stream_current_a * 1000:.3f}")
         except Exception:
             pass
+        self._try_push_to_bridge()
+
+    def _try_push_to_bridge(self):
+        """Forward the latest paired V/I reading to the backend bridge.
+
+        The Arduino sends alternating V then I lines; both must be present
+        before we push a sample so the bridge always sees a valid pair.
+        The bridge accumulates these through its filters and backbone without
+        opening any serial connection of its own.
+        """
+        if self._bridge is None:
+            return
+        if self._stream_voltage_v is None or self._stream_current_a is None:
+            return
+        try:
+            self._bridge.on_sample(self._stream_voltage_v, self._stream_current_a)
+        except Exception:
+            pass
 
     def on_measurement_stopped(self):
         """Finalize the measurement once STOPSTREAM is received."""
         if self._measurement_completed:
             return
 
+        # Ask the backend bridge for the backbone's stable Snapshot.
+        # If the backbone found a stable window during the 5-second stream,
+        # its filtered V/I values are more reliable than the raw last sample.
+        # If no snapshot was produced (noisy signal, very short stream), fall
+        # back to the raw last values so behaviour is identical to before.
         voltage_v = self._stream_voltage_v
         current_a = self._stream_current_a
+
+        if self._bridge is not None:
+            try:
+                snapshot = self._bridge.on_stream_stop()
+                if snapshot is not None:
+                    voltage_v = snapshot.voltage
+                    current_a = snapshot.current_mA / 1000.0
+            except Exception:
+                pass  # Keep raw fallback values on any bridge error
+
         if voltage_v is None or current_a is None:
             self._stream_active = False
             self.points_info.setText("Waiting for measurement data...")

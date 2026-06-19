@@ -49,7 +49,7 @@ class SerialReader(QThread):
     measurement_stopped = Signal()  # emits when STOPSTREAM is received
     status_changed = Signal(str) # emits status messages for the UI
 
-    SERIAL_PORT = "COM5"
+    SERIAL_PORT = "COM3"
     BAUD_RATE   = 115200
     SERIAL_CM_SCALE = 1.0
 
@@ -1439,7 +1439,7 @@ class HomePage(QWidget):
         command = f"{command_map.get(mode, '0')} {diameter_cm:.2f}"
         num_points = num_points_map.get(mode, 1)
 
-        self._start_measurement_command_sender(command, "COM5", 115200)
+        self._start_measurement_command_sender(command, "COM3", 115200)
 
         self.start_measurement.emit(
             thickness_mm,
