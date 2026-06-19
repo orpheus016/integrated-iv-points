@@ -154,6 +154,21 @@ def calculate_doping(
         "use_bulk_formula": False,
     }
 
+def calculate_doping_from_snapshot(
+    thickness_mm: float,
+    carrier_type: str,
+    snapshot,
+    temp_c: float = DEFAULT_TEMP_C,
+) -> dict:
+    """Calculate electrical properties using a backbone snapshot."""
+    return calculate_doping(
+        thickness_mm,
+        carrier_type,
+        snapshot.voltage,
+        snapshot.current_mA / 1000.0,
+        temp_c,
+    )
+
 def run_measurement(
     thickness_mm: float,
     carrier_type: str,

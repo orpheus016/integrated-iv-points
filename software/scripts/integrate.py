@@ -27,6 +27,7 @@ __all__ = [
     "LAST_SNAPSHOT",
     "LAST_STATUS",
     "Pipeline",
+    "FrontendBridge",
     "capture_serial_snapshot",
     "create_backbone",
     "create_commander",
@@ -221,3 +222,65 @@ def capture_serial_snapshot(args: Optional[argparse.Namespace] = None) -> Option
                 pass
 
     return snapshot
+
+import time
+
+class FrontendBridge:
+    """A push-based adapter for the PySide6 frontend to feed data into the backend.
+    
+    This class owns the backend pipeline (filtering, backbone, logging) without 
+    needing to open its own serial port, allowing the frontend's SerialReader 
+    to remain the sole owner of the serial port.
+    """
+    def __init__(self, backbone_name: str, sim_config, output_dir: str):
+        self.sim_config = sim_config
+        self.backbone = create_backbone(backbone_name, sim_config)
+        self.output_dir = output_dir
+        self.moving_average = MovingAverageFilter(sim_config.moving_average_window)
+        self.low_pass = LowPassFilter(sim_config.low_pass_alpha) if sim_config.enable_low_pass else None
+        
+        self.logger: Optional[CsvLogger] = None
+        self.last_snapshot: Optional[Snapshot] = None
+        self.last_csv_path: Optional[str] = None
+        self.start_time: float = 0.0
+        
+    def on_stream_start(self):
+        """Called when STARTSTREAM is received from Arduino."""
+        self.backbone.reset()
+        self.moving_average.reset()
+        if self.low_pass is not None:
+            self.low_pass.reset()
+            
+        run_name = f"volt_log_{datetime.now():%Y%m%d_%H%M%S}"
+        run_dir, run_filename = CsvLogger.build_run_paths(self.output_dir, run_name)
+        self.logger = CsvLogger(run_dir, filename=run_filename)
+        self.last_csv_path = self.logger.path
+        self.last_snapshot = None
+        self.start_time = time.perf_counter()
+
+    def on_sample(self, voltage_v: float, current_a: float):
+        """Called when a paired V and I reading is received."""
+        if self.logger is None:
+            return  # Stream not started
+            
+        # Convert Amperes to milliamps for the backend
+        current_mA = current_a * 1000.0
+        elapsed_s = time.perf_counter() - self.start_time
+        
+        filtered = self.moving_average.update(voltage_v)
+        if self.low_pass is not None:
+            filtered = self.low_pass.update(filtered)
+            
+        snap = self.backbone.update((elapsed_s, filtered, current_mA))
+        self.logger.log_sample(datetime.now(), elapsed_s, filtered, current_mA, snap)
+        
+        if snap is not None:
+            self.last_snapshot = snap
+            
+    def on_stream_stop(self) -> Optional[Snapshot]:
+        """Called when STOPSTREAM is received from Arduino."""
+        if self.logger is not None:
+            self.logger.close()
+            self.logger = None
+            
+        return self.last_snapshot

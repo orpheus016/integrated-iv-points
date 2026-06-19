@@ -42,6 +42,12 @@ class StreamMarkersConfig:
 
 
 @dataclass(frozen=True)
+class FrontendMarkersConfig:
+    stream_start: str = "STARTSTREAM"
+    stream_stop: str = "STOPSTREAM"
+
+
+@dataclass(frozen=True)
 class SerialProtocolConfig:
     reset_command: str = "R"
     stream_command: str = "C"
@@ -71,6 +77,7 @@ class CurrentSwitchConfig:
 @dataclass(frozen=True)
 class OutputConfig:
     ads_dir: str = "software/output/ads"
+    ads1256_dir_name: str = "ads1256"
     testbench_dir: str = "software/output/testbench"
 
 
@@ -128,7 +135,7 @@ class CLIConfig:
     stop_require_post_switch: bool = True
     stop_final_holdoff_s: float = CurrentSwitchConfig.max_settle_s
     output_dir: str = "software/output"
-    port: str = "COM12"
+    port: str = "COM3"
     baud: int = 115200
     switch_currents: str = "4.0,8.0,12.0,20.0"
     switch_raise_low: str = "0.3,0.25,0.15,0.0"
@@ -145,16 +152,22 @@ class CLIConfig:
     backbones: str = "stddev_window,baseline,hysteresis,derivative_integration"
     show: bool = False
     filename: str = ""
+    frontend_start_marker: str = FrontendMarkersConfig.stream_start
+    frontend_stop_marker: str = FrontendMarkersConfig.stream_stop
+    data_format: str = "vi_prefixed"  # "vi_prefixed" for PySide GUI, "csv" for backend standalone
+
 
 
 @dataclass(frozen=True)
 class SerialConfig:
-    port: str = "COM12"
+    port: str = "COM3"
     baud_rate: int = 115200
     timeout_s: float = 1.0
     markers: StreamMarkersConfig = StreamMarkersConfig()
+    frontend_markers: FrontendMarkersConfig = FrontendMarkersConfig()
     protocol: SerialProtocolConfig = SerialProtocolConfig()
     current_switch: CurrentSwitchConfig = CurrentSwitchConfig()
+    data_format: str = "csv"
 
 
 def _parse_float_tuple(value: str, expected_len: int, label: str) -> Tuple[float, ...]:
@@ -253,6 +266,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backbones", type=str, default=defaults.backbones, help="comma-separated backbone names to evaluate")
     parser.add_argument("--show", action="store_true", help="show interactive plots", default=defaults.show)
     parser.add_argument("--filename", type=str, default=defaults.filename, help="Custom name for saved CSV (manual_capture)")
+    # Frontend config args
+    parser.add_argument("--frontend-start-marker", type=str, default=defaults.frontend_start_marker, help="marker that Arduino sends to start the stream")
+    parser.add_argument("--frontend-stop-marker", type=str, default=defaults.frontend_stop_marker, help="marker that Arduino sends to stop the stream")
+    parser.add_argument("--data-format", choices=["csv", "vi_prefixed"], default=defaults.data_format, help="format of data lines over serial")
     return parser
 
 
@@ -300,4 +317,14 @@ def build_serial_config(args: argparse.Namespace) -> SerialConfig:
         max_settle_s=args.switch_max_settle,
         stage_match_tolerance_mA=args.switch_stage_match_tol,
     )
-    return SerialConfig(port=args.port, baud_rate=args.baud, current_switch=current_switch)
+    frontend_markers = FrontendMarkersConfig(
+        stream_start=args.frontend_start_marker,
+        stream_stop=args.frontend_stop_marker,
+    )
+    return SerialConfig(
+        port=args.port, 
+        baud_rate=args.baud, 
+        current_switch=current_switch,
+        frontend_markers=frontend_markers,
+        data_format=args.data_format,
+    )

@@ -104,6 +104,17 @@ class SerialCommander:
         current_mA = float(parts[1])
         return StreamSample(timestamp_s=timestamp_s, voltage_v=voltage_v, current_mA=current_mA)
 
+    def parse_vi_prefixed_lines(self, v_line: str, i_line: str, timestamp_s: float) -> StreamSample:
+        """Parse V<val> and I<val> lines, converting I (Amperes) to mA."""
+        if not v_line.startswith("V") or not i_line.startswith("I"):
+            raise ValueError(f"expected 'V<val>' and 'I<val>', got: {v_line!r}, {i_line!r}")
+        try:
+            voltage_v = float(v_line[1:])
+            current_a = float(i_line[1:])
+        except ValueError as e:
+            raise ValueError(f"could not parse floats from {v_line!r}, {i_line!r}") from e
+        return StreamSample(timestamp_s=timestamp_s, voltage_v=voltage_v, current_mA=current_a * 1000.0)
+
     def read_line(self) -> str:
         self._ensure_open()
         assert self._serial is not None
