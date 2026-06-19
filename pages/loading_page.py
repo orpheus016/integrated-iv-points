@@ -451,8 +451,9 @@ class LoadingPage(QWidget):
     def on_voltage_received(self, voltage_v: float):
         try:
             self._stream_voltage_v = float(voltage_v)
-            display_v = self._stream_voltage_v / self._gain
-            self.volt.set_value(f"{display_v:.3f}")
+            if self._bridge is None:
+                display_v = self._stream_voltage_v / self._gain
+                self.volt.set_value(f"{display_v:.3f}")
         except Exception:
             pass
         self._try_push_to_bridge()
@@ -461,7 +462,8 @@ class LoadingPage(QWidget):
         """Update the live current reading during a measurement stream."""
         try:
             self._stream_current_a = float(current_a)
-            self.curr.set_value(f"{self._stream_current_a * 1000:.3f}")
+            if self._bridge is None:
+                self.curr.set_value(f"{self._stream_current_a * 1000:.3f}")
         except Exception:
             pass
         self._try_push_to_bridge()
@@ -479,7 +481,18 @@ class LoadingPage(QWidget):
         if self._stream_voltage_v is None or self._stream_current_a is None:
             return
         try:
-            self._bridge.on_sample(self._stream_voltage_v, self._stream_current_a)
+            res = self._bridge.on_sample(self._stream_voltage_v, self._stream_current_a)
+            if res:
+                filtered_v, snap = res
+                if snap is not None:
+                    display_v = snap.voltage / self._gain
+                    display_i = snap.current_mA
+                else:
+                    display_v = filtered_v / self._gain
+                    display_i = self._stream_current_a * 1000.0
+
+                self.volt.set_value(f"{display_v:.3f}")
+                self.curr.set_value(f"{display_i:.3f}")
         except Exception:
             pass
 

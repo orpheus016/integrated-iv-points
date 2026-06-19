@@ -11,9 +11,7 @@ def loading_page():
     pass
 
 def test_loading_page_gain_live_display(monkeypatch):
-    """Verify that live voltage is divided by gain before displaying."""
-    # Since we can't easily instantiate a QWidget without a QApplication,
-    # we can just mock the UI components we need to test the logic.
+    """Verify that live voltage is divided by gain before displaying, using the bridge filtered output."""
     from PySide6.QtWidgets import QApplication
     import sys
     
@@ -27,12 +25,52 @@ def test_loading_page_gain_live_display(monkeypatch):
     
     # Mock the volt display to check what it is set to
     page.volt = MagicMock()
+    page.curr = MagicMock()
     
-    # Test on_voltage_received
+    # Ensure bridge is mock
+    if page._bridge is not None:
+        page._bridge.on_sample = MagicMock(return_value=(1.82, None))
+
+    # Test on_voltage_received (this will just set _stream_voltage_v)
     page.on_voltage_received(1.82)
     
-    # It should divide 1.82 by 1.82 to get 1.000
+    # Test on_current_received which triggers the bridge
+    page.on_current_received(0.010)
+    
+    # It should divide filtered value (1.82) by 1.82 to get 1.000
     page.volt.set_value.assert_called_with("1.000")
+    page.curr.set_value.assert_called_with("10.000")
+
+def test_loading_page_gain_live_display_with_snapshot(monkeypatch):
+    """Verify that live display prioritizes snapshot values if available."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+    
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+
+    monkeypatch.setattr("pages.loading_page.SimulationConfig.gain", 1.82)
+    
+    page = LoadingPage()
+    
+    page.volt = MagicMock()
+    page.curr = MagicMock()
+    
+    from software.utils.types import Snapshot
+    snap = Snapshot(timestamp=1.0, voltage=3.64, current_mA=20.0, resistance=10.0, std_dev=0.1)
+    
+    # Mock bridge returning a snapshot
+    if page._bridge is not None:
+        page._bridge.on_sample = MagicMock(return_value=(1.82, snap))
+
+    page.on_voltage_received(1.82)
+    page.on_current_received(0.010)
+    
+    # It should use snapshot.voltage (3.64) divided by gain (1.82) -> 2.000
+    page.volt.set_value.assert_called_with("2.000")
+    # It should use snapshot.current_mA directly
+    page.curr.set_value.assert_called_with("20.000")
 
 def test_loading_page_gain_final_result(monkeypatch):
     """Verify that the final snapshot voltage is divided by gain."""

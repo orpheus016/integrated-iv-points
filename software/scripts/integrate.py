@@ -11,7 +11,7 @@ import contextlib
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Tuple
 
 from ..command.serial_commander import SerialCommander
 from ..config.config import OutputConfig, SerialConfig, build_arg_parser, build_serial_config, build_simulation_config
@@ -258,10 +258,10 @@ class FrontendBridge:
         self.last_snapshot = None
         self.start_time = time.perf_counter()
 
-    def on_sample(self, voltage_v: float, current_a: float):
+    def on_sample(self, voltage_v: float, current_a: float) -> Optional[Tuple[float, Optional[Snapshot]]]:
         """Called when a paired V and I reading is received."""
         if self.logger is None:
-            return  # Stream not started
+            return None  # Stream not started
             
         # Convert Amperes to milliamps for the backend
         current_mA = current_a * 1000.0
@@ -276,6 +276,8 @@ class FrontendBridge:
         
         if snap is not None:
             self.last_snapshot = snap
+            
+        return filtered, snap
             
     def on_stream_stop(self) -> Optional[Snapshot]:
         """Called when STOPSTREAM is received from Arduino."""
