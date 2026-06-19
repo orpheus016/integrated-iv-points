@@ -120,15 +120,9 @@ class LoadingPage(QWidget):
         self._manual_mode = False
         self._serial_reader = None
         self._waiting_for_probe_contact = True
-        
-        try:
-            args = build_arg_parser().parse_args([])
-            sim_config = build_simulation_config(args)
-            self._bridge = FrontendBridge(args.backbone, sim_config, os.path.join(args.output_dir, "ads1256"))
-        except Exception as e:
-            print(f"Failed to init FrontendBridge: {e}")
-            self._bridge = None
-            
+        # Bridge is lazy-created in on_measurement_started() when STARTSTREAM arrives.
+        self._bridge = None
+
         self._build_ui()
 
     def _build_ui(self):
@@ -419,7 +413,11 @@ class LoadingPage(QWidget):
         self._waiting_for_probe_contact = not bool(contact_made)
 
     def on_measurement_started(self):
-        """Reset the live V/I display at the start of a streamed measurement."""
+        """Reset the live V/I display and backend pipeline when STARTSTREAM arrives.
+
+        The FrontendBridge is lazy-created here on the first STARTSTREAM and
+        reset on every subsequent one, keeping __init__ free of backend setup.
+        """
         self._stream_active = True
         self._stream_voltage_v = None
         self._stream_current_a = None
@@ -431,6 +429,21 @@ class LoadingPage(QWidget):
         self.sig.set_value("--")
         self.dop.set_value("--")
         self._update_points_info()
+
+        # Lazy-create the bridge on first use; reset it on every subsequent run.
+        if self._bridge is None:
+            try:
+                args = build_arg_parser().parse_args([])
+                sim_config = build_simulation_config(args)
+                self._bridge = FrontendBridge(
+                    args.backbone, sim_config,
+                    os.path.join(args.output_dir, "ads1256")
+                )
+            except Exception as e:
+                print(f"FrontendBridge init failed: {e}")
+                self._bridge = None
+        if self._bridge is not None:
+            self._bridge.on_stream_start()
 
 
     def on_voltage_received(self, voltage_v: float):
@@ -550,10 +563,10 @@ class LoadingPage(QWidget):
         self._update_points_info()
 
     def start_loading(self, num_points: int = 1):
-        """Start measurement mode.
+        """Show the loading page and reset UI state for a new measurement run.
 
-        Resets the backend pipeline (FrontendBridge backbone + filters + logger)
-        immediately so it is clean before any STARTSTREAM serial data arrives.
+        Backend pipeline (FrontendBridge) is reset separately in
+        on_measurement_started() when STARTSTREAM arrives from the Arduino.
         """
         self.set_num_points(num_points)
         self._waiting_for_probe_contact = True
@@ -568,10 +581,6 @@ class LoadingPage(QWidget):
             self.wafer_temp_info.setText(f"Wafer Temp : {self._wafer_temp_value:.2f} C")
         if hasattr(self, 'room_temp_info'):
             self.room_temp_info.setText(f"Room Temp : {self._home_room_temp_c:.1f} C")
-        # Reset the backend pipeline on measurement entry so the bridge/backbone/logger
-        # start fresh for every run, not when STARTSTREAM arrives (which may be delayed).
-        if hasattr(self, '_bridge') and self._bridge:
-            self._bridge.on_stream_start()
         # No timer - updates happen in real-time via on_position_received()
         self._update_points_info()
 
