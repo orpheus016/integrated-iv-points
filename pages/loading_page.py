@@ -134,6 +134,7 @@ class LoadingPage(QWidget):
             )
         else:
             self._bridge = None
+            print("backend not connected")
 
         self._build_ui()
 

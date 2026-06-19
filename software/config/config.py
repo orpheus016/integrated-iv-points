@@ -13,7 +13,7 @@ class SimulationConfig:
     window_seconds: float = 10.0
     snapshot_min_recording_s: float = 1.0
     max_measurement_s: float = 5.0
-    gain: float = 1.0
+    gain: float = 1.82
     current_source_a: float = 0.010
     sample_resistance_ohm: float = 1.0
     transient_model: str = "first_order"
@@ -135,7 +135,7 @@ class CLIConfig:
     stop_require_post_switch: bool = True
     stop_final_holdoff_s: float = CurrentSwitchConfig.max_settle_s
     output_dir: str = "software/output"
-    port: str = "COM3"
+    port: str = "COM5"
     baud: int = 115200
     switch_currents: str = "4.0,8.0,12.0,20.0"
     switch_raise_low: str = "0.3,0.25,0.15,0.0"
@@ -160,7 +160,7 @@ class CLIConfig:
 
 @dataclass(frozen=True)
 class SerialConfig:
-    port: str = "COM3"
+    port: str = "COM5"
     baud_rate: int = 115200
     timeout_s: float = 1.0
     markers: StreamMarkersConfig = StreamMarkersConfig()

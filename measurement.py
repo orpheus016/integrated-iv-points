@@ -8,9 +8,12 @@ try:
 except ImportError:
     SERIAL_AVAILABLE = False
 
+from software.config.config import SimulationConfig
+
 Q_E = 1.602e-19
 
 DEFAULT_TEMP_C = 0.0
+GAIN = SimulationConfig.gain
 
 
 def _read_voltage_current_from_serial(port: str = "COM5", baud_rate: int = 9600) -> tuple[float, float, str]:
@@ -55,7 +58,7 @@ def _read_voltage_current_from_serial(port: str = "COM5", baud_rate: int = 9600)
 
                 if upper.startswith("V"):
                     try:
-                        voltage_v = float(text[1:].strip())
+                        voltage_v = float(text[1:].strip()) / GAIN
                     except ValueError:
                         pass
                     deadline = time.monotonic() + 30.0

@@ -5,7 +5,7 @@
 
 // Hardware Pin Definitions
 const int relayPins[4] = {30, 32, 34, 36}; // Stage 3, Stage 2, Stage 1, Stage 0
-const int validPins[4] = {22, 24, 26, 28}; // Validation Relays
+const int validPins[4] = {22, 24, 26, 28}; // Validation Pins
 const int RELAY_ON  = HIGH;
 const int RELAY_OFF = LOW;
 
@@ -224,9 +224,10 @@ void streamContinuous_CSV(int posCh, int negCh) {
     
     // Output transmission packet to host
     Serial.print("V");
-    Serial.println(v,8); 
-    Serial.print("I"); 
+    Serial.println(v, 8); 
+    //Serial.print(","); 
     // Current stage to current output
+    Serial.print("I");
     if (currentStage == 0) {
       Serial.println(0.004,3);
     } 
@@ -260,7 +261,7 @@ void setupInstrument(){
   digitalWrite(relayPins[0], RELAY_ON); 
   currentStage = 0;
 
-  //Validation Switch RELAY_ON for switch to validation with resistors
+  // Validation Pins
   for (int j = 0; j < 4; j++) {
     pinMode(validPins[j], OUTPUT);
     digitalWrite(validPins[j], RELAY_OFF);
