@@ -431,9 +431,6 @@ class LoadingPage(QWidget):
         self.sig.set_value("--")
         self.dop.set_value("--")
         self._update_points_info()
-        
-        if hasattr(self, '_bridge') and self._bridge:
-            self._bridge.on_stream_start()
 
 
     def on_voltage_received(self, voltage_v: float):
@@ -553,7 +550,11 @@ class LoadingPage(QWidget):
         self._update_points_info()
 
     def start_loading(self, num_points: int = 1):
-        """Start measurement mode."""
+        """Start measurement mode.
+
+        Resets the backend pipeline (FrontendBridge backbone + filters + logger)
+        immediately so it is clean before any STARTSTREAM serial data arrives.
+        """
         self.set_num_points(num_points)
         self._waiting_for_probe_contact = True
         if hasattr(self, '_end_button'):
@@ -567,6 +568,10 @@ class LoadingPage(QWidget):
             self.wafer_temp_info.setText(f"Wafer Temp : {self._wafer_temp_value:.2f} C")
         if hasattr(self, 'room_temp_info'):
             self.room_temp_info.setText(f"Room Temp : {self._home_room_temp_c:.1f} C")
+        # Reset the backend pipeline on measurement entry so the bridge/backbone/logger
+        # start fresh for every run, not when STARTSTREAM arrives (which may be delayed).
+        if hasattr(self, '_bridge') and self._bridge:
+            self._bridge.on_stream_start()
         # No timer - updates happen in real-time via on_position_received()
         self._update_points_info()
 

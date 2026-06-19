@@ -128,3 +128,98 @@ def test_frontend_data_flow_and_switching(tmp_path):
     assert "doping_cm3" in result
     assert result["doping_cm3"] > 0, "Calculated doping should be a positive float."
     assert result["resistivity_ohm_cm"] > 0, "Calculated resistivity should be positive."
+
+
+def test_bridge_resets_on_start_loading(tmp_path):
+    """Verify that on_stream_start() (called by start_loading()) cleanly resets
+    the backbone, filters, and logger so each measurement run starts fresh.
+
+    This mirrors the fix applied to LoadingPage.start_loading(): the bridge is
+    reset at measurement entry, not when STARTSTREAM arrives from serial.
+    """
+    args = build_arg_parser().parse_args([])
+    sim_config = build_simulation_config(args)
+
+    bridge = FrontendBridge("bocd", sim_config, str(tmp_path))
+
+    # --- First run ---
+    bridge.on_stream_start()
+    first_logger_path = bridge.last_csv_path
+    assert bridge.logger is not None, "Logger should be open after on_stream_start()"
+    assert bridge.last_snapshot is None, "Snapshot must be None at stream start"
+
+    # Feed a handful of stable samples so the backbone may emit a snapshot
+    for i in range(20):
+        bridge.on_sample(voltage_v=1.5, current_a=0.004)
+
+    # Capture first-run snapshot state
+    first_snapshot = bridge.last_snapshot
+    bridge.on_stream_stop()
+    assert bridge.logger is None, "Logger should be closed after on_stream_stop()"
+
+    # --- Second run (simulates user pressing Start Measurement again) ---
+    bridge.on_stream_start()
+    second_logger_path = bridge.last_csv_path
+
+    assert second_logger_path != first_logger_path, (
+        "Each run must write to a unique timestamped directory"
+    )
+    assert bridge.last_snapshot is None, (
+        "Snapshot must be reset to None at the start of a new run"
+    )
+    assert bridge.logger is not None, "Logger must be open for the second run"
+
+    # Feed samples for second run with a different voltage level
+    for i in range(20):
+        bridge.on_sample(voltage_v=2.0, current_a=0.008)
+
+    second_snapshot = bridge.on_stream_stop()
+
+    # The two snapshots should be independent
+    if first_snapshot is not None and second_snapshot is not None:
+        assert first_snapshot is not second_snapshot, (
+            "Second run snapshot must be a new object, not the first run's"
+        )
+
+
+def test_sequential_measurement_runs_no_stale_state(tmp_path):
+    """Simulate two complete measurement cycles through FrontendBridge and
+    confirm that the second run is not contaminated by the first run's data.
+
+    This is the unit-level equivalent of pressing 'Start Measurement' twice in
+    the GUI, exercising the same reset path that LoadingPage.start_loading() calls.
+    """
+    args = build_arg_parser().parse_args([])
+    sim_config = build_simulation_config(args)
+
+    bridge = FrontendBridge("bocd", sim_config, str(tmp_path))
+
+    def _run_stream(voltage_v: float, current_a: float, n_samples: int = 30):
+        """Helper: start stream, push samples, stop stream, return snapshot."""
+        bridge.on_stream_start()
+        for _ in range(n_samples):
+            bridge.on_sample(voltage_v=voltage_v, current_a=current_a)
+        return bridge.on_stream_stop()
+
+    # Run 1: low-impedance scenario
+    snap1 = _run_stream(voltage_v=0.5, current_a=0.020, n_samples=40)
+
+    # Run 2: high-impedance scenario with a different voltage
+    snap2 = _run_stream(voltage_v=3.0, current_a=0.004, n_samples=40)
+
+    # Both runs must produce independent (or None) snapshots
+    # If backbone produced snapshots, they must differ
+    if snap1 is not None and snap2 is not None:
+        # Voltage regimes differ by 6x — snapshots cannot be identical
+        assert snap1 is not snap2, "Snapshots from separate runs must be distinct objects"
+        # The second-run snapshot should reflect the higher voltage regime
+        assert abs(snap2.voltage - snap1.voltage) > 0.01, (
+            f"Second-run snapshot voltage ({snap2.voltage:.4f}V) should differ "
+            f"from first-run ({snap1.voltage:.4f}V) given different input regimes"
+        )
+
+    # Verify unique log files were written for each run
+    csv_files = list(tmp_path.rglob("*.csv"))
+    assert len(csv_files) >= 2, (
+        f"Expected at least 2 separate CSV log files (one per run), found {len(csv_files)}"
+    )

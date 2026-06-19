@@ -251,7 +251,7 @@ class FrontendBridge:
         if self.low_pass is not None:
             self.low_pass.reset()
             
-        run_name = f"volt_log_{datetime.now():%Y%m%d_%H%M%S}"
+        run_name = f"volt_log_{datetime.now():%Y%m%d_%H%M%S_%f}"
         run_dir, run_filename = CsvLogger.build_run_paths(self.output_dir, run_name)
         self.logger = CsvLogger(run_dir, filename=run_filename)
         self.last_csv_path = self.logger.path
