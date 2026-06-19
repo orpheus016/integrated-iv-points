@@ -132,8 +132,10 @@ class LoadingPage(QWidget):
                 sim_config=SimulationConfig(),
                 output_dir="software/output/ads1256",
             )
+            self._gain = SimulationConfig.gain
         else:
             self._bridge = None
+            self._gain = 1.0
             print("backend not connected")
 
         self._build_ui()
@@ -449,7 +451,8 @@ class LoadingPage(QWidget):
     def on_voltage_received(self, voltage_v: float):
         try:
             self._stream_voltage_v = float(voltage_v)
-            self.volt.set_value(f"{self._stream_voltage_v:.3f}")
+            display_v = self._stream_voltage_v / self._gain
+            self.volt.set_value(f"{display_v:.3f}")
         except Exception:
             pass
         self._try_push_to_bridge()
@@ -506,6 +509,8 @@ class LoadingPage(QWidget):
             self._stream_active = False
             self.points_info.setText("Waiting for measurement data...")
             return
+
+        voltage_v = voltage_v / self._gain
 
         result = calculate_doping(
             self._thickness_mm,
