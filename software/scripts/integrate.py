@@ -11,7 +11,7 @@ import contextlib
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Optional, Tuple
+from typing import Callable, Iterator, Optional, Tuple
 
 from ..command.serial_commander import SerialCommander
 from ..config.config import OutputConfig, SerialConfig, build_arg_parser, build_serial_config, build_simulation_config
@@ -232,7 +232,14 @@ class FrontendBridge:
     needing to open its own serial port, allowing the frontend's SerialReader 
     to remain the sole owner of the serial port.
     """
-    def __init__(self, backbone_name: str, sim_config, output_dir: str):
+    def __init__(
+        self, 
+        backbone_name: str, 
+        sim_config, 
+        output_dir: str,
+        serial_config: Optional[SerialConfig] = None,
+        write_callback: Optional[Callable[[str], None]] = None
+    ):
         self.sim_config = sim_config
         self.backbone = create_backbone(backbone_name, sim_config)
         self.output_dir = output_dir
@@ -243,6 +250,24 @@ class FrontendBridge:
         self.last_snapshot: Optional[Snapshot] = None
         self.last_csv_path: Optional[str] = None
         self.start_time: float = 0.0
+
+        self.commander = None
+        self.switch_policy = None
+        self.blanking_until_s: Optional[float] = None
+
+        if serial_config is not None:
+            from ..command.serial_commander import SerialCommander
+            self.commander = SerialCommander(serial_config)
+            self.switch_policy = serial_config.current_switch
+            
+            if write_callback is not None:
+                class CallbackSerial:
+                    is_open = True
+                    def write(self_, data: bytes):
+                        # The string is already formatted (e.g. "i1") but SerialCommander writes it encoded.
+                        write_callback(data.decode("utf-8").strip())
+                self.commander._serial = CallbackSerial()
+
         
     def on_stream_start(self):
         """Called when STARTSTREAM is received from Arduino."""
@@ -257,6 +282,8 @@ class FrontendBridge:
         self.last_csv_path = self.logger.path
         self.last_snapshot = None
         self.start_time = time.perf_counter()
+        if self.switch_policy is not None:
+            self.blanking_until_s = self.switch_policy.blanking_s
 
     def on_sample(self, voltage_v: float, current_a: float) -> Optional[Tuple[float, Optional[Snapshot]]]:
         """Called when a paired V and I reading is received."""
@@ -271,12 +298,34 @@ class FrontendBridge:
         if self.low_pass is not None:
             filtered = self.low_pass.update(filtered)
             
-        snap = self.backbone.update((elapsed_s, filtered, current_mA))
+        in_blanking = False
+        if self.switch_policy is not None and self.blanking_until_s is not None:
+            in_blanking = elapsed_s < self.blanking_until_s
+            
+        snap = None
+        if not in_blanking:
+            snap = self.backbone.update((elapsed_s, filtered, current_mA))
+            
+            if snap is not None:
+                self.last_snapshot = snap
+                
+                if self.commander is not None:
+                    try:
+                        decision = self.commander.decide_stage(snap.voltage, snap.current_mA)
+                        if decision.switched and self.switch_policy is not None:
+                            self.blanking_until_s = elapsed_s + self.switch_policy.blanking_s
+                            
+                            self.moving_average.reset()
+                            if self.low_pass is not None:
+                                self.low_pass.reset()
+                            self.backbone.reset()
+                            self.last_snapshot = None
+                            snap = None
+                    except Exception:
+                        pass
+
         self.logger.log_sample(datetime.now(), elapsed_s, filtered, current_mA, snap)
         
-        if snap is not None:
-            self.last_snapshot = snap
-            
         return filtered, snap
             
     def on_stream_stop(self) -> Optional[Snapshot]:

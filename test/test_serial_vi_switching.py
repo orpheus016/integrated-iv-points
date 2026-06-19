@@ -172,84 +172,59 @@ def _run_constant_voltage_stream(
     constant_v: float,
     initial_current_a: float,
     bridge: FrontendBridge,
-    commander: SerialCommander,
     page: _LoadingPageShim,
-) -> Tuple[int, float, int]:
+    mock_serial: _MockSerial,
+    serial_config,
+) -> Tuple[int, float, int, list]:
     """Inject constant-voltage VI lines until a snapshot is obtained or budget expires.
 
     Implements the full integration loop:
       1. Emit STARTSTREAM → ``on_measurement_started``
       2. For each sample:
          a. Emit V<v> + I<i> → ``on_voltage_received`` + ``on_current_received``
-         b. Check ``bridge.last_snapshot`` — if new, call ``commander.decide_stage``
-         c. On a stage switch: reset backbone / filters, update applied current, emit
-            a short STARTSTREAM-equivalent reset on bridge internals
+         b. The bridge processes it internally and fires `mock_serial_write` if needed.
+         c. On a stage switch: update applied current.
       3. Once snapshot obtained, break.
       4. Emit STOPSTREAM → ``on_measurement_stopped``
-
-    Returns
-    -------
-    (final_stage, final_snapshot_current_mA, samples_consumed)
     """
-    # 1. STARTSTREAM
     page.on_measurement_started()
 
     current_a = initial_current_a
-    previous_snapshot = None
     samples = 0
     final_snapshot = None
-
-    # Introduce a small monotonic counter so the backbone's elapsed_s increases
-    # between samples (FrontendBridge uses time.perf_counter internally, which
-    # already advances; we just drive samples fast enough).
+    current_stage = 0
+    all_written = []
 
     for _ in range(_MAX_SAMPLES):
         samples += 1
-
-        # 2a. Emit one VI pair
         _emit_vi_prefixed_line(page, constant_v, current_a)
 
-        # 2b. Check for a new snapshot
-        snap = bridge.last_snapshot
-        is_new_snapshot = (snap is not previous_snapshot) and (snap is not None)
-        previous_snapshot = snap
+        # Check for stage switch commands from the encapsulated commander
+        while mock_serial.written:
+            cmd = mock_serial.written.pop(0)
+            all_written.append(cmd)
+            if cmd.startswith("i"):
+                try:
+                    stage = int(cmd.strip()[1:])
+                    current_stage = stage
+                    current_a = serial_config.current_switch.current_mA_by_stage[stage] / 1000.0
+                except ValueError:
+                    pass
+            elif cmd.strip() == "c":
+                current_stage = 0
+                current_a = serial_config.current_switch.current_mA_by_stage[0] / 1000.0
 
-        if is_new_snapshot:
-            # 2c. Commander evaluates snapshot and decides whether to switch stage
-            decision = commander.decide_stage(snap.voltage, snap.current_mA)
+        if bridge.last_snapshot is not None:
+            # Reached convergence!
+            final_snapshot = bridge.last_snapshot
+            break
 
-            if decision.switched:
-                # Emulate hardware: reset backbone + filters after stage switch
-                bridge.backbone.reset()
-                bridge.moving_average.reset()
-                if bridge.low_pass:
-                    bridge.low_pass.reset()
-
-                # The new current_mA_by_stage value becomes our injected current
-                new_stage = decision.stage
-                new_current_a = commander._config.current_switch.current_mA_by_stage[new_stage] / 1000.0
-                current_a = new_current_a
-
-                # We also need to reset bridge state so the next samples start fresh
-                # (mirrors the STARTSTREAM→on_measurement_started reset path)
-                bridge.backbone.reset()
-                bridge.moving_average.reset()
-                if bridge.low_pass:
-                    bridge.low_pass.reset()
-
-            else:
-                # No switch — snapshot is the stable result we were waiting for
-                final_snapshot = snap
-                break
-
-    # 4. STOPSTREAM
     stopped_snapshot = page.on_measurement_stopped()
     if final_snapshot is None:
         final_snapshot = stopped_snapshot or bridge.last_snapshot
 
-    final_stage = commander.current_stage()
-    final_current_mA = commander._config.current_switch.current_mA_by_stage[final_stage]
-    return final_stage, final_current_mA, samples
+    final_current_mA = serial_config.current_switch.current_mA_by_stage[current_stage]
+    return current_stage, final_current_mA, samples, all_written
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +241,7 @@ def _run_constant_voltage_stream(
 )
 def test_vi_serial_switching_converges(
     tmp_path,
+    monkeypatch,
     constant_v: float,
     expected_stage: int,
     expected_mA: float,
@@ -287,6 +263,13 @@ def test_vi_serial_switching_converges(
        a stage switch was needed (verifying the backend→hardware signal path).
     """
     # --- Setup ---
+    import time
+    mock_time = [0.0]
+    def mock_perf_counter():
+        mock_time[0] += 0.01  # Advance 10ms per call (~100 SPS)
+        return mock_time[0]
+    monkeypatch.setattr(time, "perf_counter", mock_perf_counter)
+
     args = build_arg_parser().parse_args([
         "--noise", "0",           # zero noise for deterministic convergence
         "--backbone", "bocd",
@@ -294,12 +277,17 @@ def test_vi_serial_switching_converges(
     sim_config = build_simulation_config(args)
     serial_config = build_serial_config(args)
 
-    bridge = FrontendBridge("bocd", sim_config, str(tmp_path))
-    commander = SerialCommander(serial_config)
-
-    # Inject mock serial so set_stage() / reset() don't fail
     mock_serial = _MockSerial()
-    commander._serial = mock_serial
+    def mock_serial_write(cmd: str):
+        mock_serial.written.append(cmd)
+
+    bridge = FrontendBridge(
+        "bocd", 
+        sim_config, 
+        str(tmp_path), 
+        serial_config=serial_config, 
+        write_callback=mock_serial_write
+    )
 
     page = _LoadingPageShim(bridge)
 
@@ -307,12 +295,13 @@ def test_vi_serial_switching_converges(
     initial_current_a = serial_config.current_switch.current_mA_by_stage[0] / 1000.0
 
     # --- Run ---
-    final_stage, final_current_mA, samples_consumed = _run_constant_voltage_stream(
+    final_stage, final_current_mA, samples_consumed, all_written = _run_constant_voltage_stream(
         constant_v=constant_v,
         initial_current_a=initial_current_a,
         bridge=bridge,
-        commander=commander,
         page=page,
+        mock_serial=mock_serial,
+        serial_config=serial_config,
     )
 
     # --- Retrieve final snapshot ---
@@ -329,7 +318,7 @@ def test_vi_serial_switching_converges(
             f"  snapshot: V={final_snapshot.voltage:.5f}  "
             f"I={final_snapshot.current_mA:.3f}mA"
         )
-    print(f"  serial writes: {[b.decode('utf-8', errors='replace') for b in mock_serial.written]}")
+    print(f"  serial writes: {all_written}")
 
     # 1. Backbone must have converged
     assert final_snapshot is not None, (
@@ -357,9 +346,8 @@ def test_vi_serial_switching_converges(
 
     # 5. Serial write log contains i<stage> command if stage != 0
     #    (stage 0 is the default; no switch command is sent for it)
-    written_text = [b.decode("utf-8", errors="replace") for b in mock_serial.written]
     if expected_stage > 0:
         expected_cmd = f"i{expected_stage}"
-        assert any(expected_cmd in w for w in written_text), (
-            f"Expected serial command '{expected_cmd}' not found in writes: {written_text}"
+        assert any(expected_cmd in w for w in all_written), (
+            f"Expected serial command '{expected_cmd}' not found in writes: {all_written}"
         )

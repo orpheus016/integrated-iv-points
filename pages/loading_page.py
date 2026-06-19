@@ -16,7 +16,7 @@ import random
 
 try:
     from software.scripts.integrate import FrontendBridge
-    from software.config.config import SimulationConfig
+    from software.config.config import SimulationConfig, SerialConfig
     _BACKEND_AVAILABLE = True
 except ImportError:
     _BACKEND_AVAILABLE = False
@@ -127,10 +127,19 @@ class LoadingPage(QWidget):
         # Receives data pushed from Qt signal handlers and runs the backbone
         # (BOCD by default) to find a stable Snapshot during each stream window.
         if _BACKEND_AVAILABLE:
+            def send_cmd(cmd: str):
+                if self._serial_reader is not None:
+                    try:
+                        self._serial_reader.send_command(cmd)
+                    except Exception:
+                        pass
+
             self._bridge = FrontendBridge(
                 backbone_name="bocd",
                 sim_config=SimulationConfig(),
                 output_dir="software/output/ads1256",
+                serial_config=SerialConfig(),
+                write_callback=send_cmd
             )
             self._gain = SimulationConfig.gain
         else:
