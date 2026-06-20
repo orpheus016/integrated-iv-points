@@ -46,7 +46,7 @@ unsigned long readRegister(uint8_t registerAddress) {
   digitalWrite(CS_pin, LOW);
   SPI.transfer(0x10 | registerAddress);
   SPI.transfer(0x00);
-  delayMicroseconds(5);
+  delayMicroseconds(10);
   registerValueR = SPI.transfer(0xFF);
   digitalWrite(CS_pin, HIGH);
   SPI.endTransaction();
@@ -60,6 +60,7 @@ void writeRegister(uint8_t registerAddress, uint8_t registerValueW) {
   delayMicroseconds(5);
   SPI.transfer(0x50 | registerAddress);
   SPI.transfer(0x00);
+  delayMicroseconds(10);
   SPI.transfer(registerValueW);
   digitalWrite(CS_pin, HIGH);
   SPI.endTransaction();
@@ -151,6 +152,7 @@ void streamContinuous_CSV(int posCh, int negCh) {
   digitalWrite(CS_pin, LOW);
   SPI.transfer(0x50 | 1);
   SPI.transfer(0x00);
+  delayMicroseconds(10);
   SPI.transfer(muxValue);
   digitalWrite(CS_pin, HIGH);
   SPI.endTransaction();
