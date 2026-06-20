@@ -83,7 +83,7 @@ class SerialCommander:
         protocol = self._config.protocol
         next_stage = self._current_stage
 
-        power_mw = voltage_v * current_mA
+        power_mw = (voltage_v / policy.gain) * current_mA
         if power_mw > policy.power_limit_mw:
             next_stage = self._downshift_for_power(voltage_v)
         elif self._can_raise(voltage_v):
@@ -161,7 +161,7 @@ class SerialCommander:
         while next_stage > protocol.stage_command_min:
             candidate = next_stage - 1
             candidate_current = policy.current_mA_by_stage[candidate]
-            if voltage_v * candidate_current <= policy.power_limit_mw:
+            if (voltage_v / policy.gain) * candidate_current <= policy.power_limit_mw:
                 return candidate
             next_stage = candidate
         return protocol.stage_command_min

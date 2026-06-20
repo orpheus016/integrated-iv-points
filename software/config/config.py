@@ -52,7 +52,7 @@ class SerialProtocolConfig:
     reset_command: str = "R"
     stream_command: str = "C"
     stop_command: str = "s"
-    stage_command_prefix: str = "i"
+    stage_command_prefix: str = "i "
     stage_command_min: int = 0
     stage_command_max: int = 3
     stream_startup_delay_s: float = 2.0
@@ -72,6 +72,7 @@ class CurrentSwitchConfig:
     blanking_s: float = 0.5
     max_settle_s: float = 1.2
     stage_match_tolerance_mA: float = 0.1
+    gain: float = 1.82
 
 
 @dataclass(frozen=True)
@@ -316,6 +317,7 @@ def build_serial_config(args: argparse.Namespace) -> SerialConfig:
         blanking_s=args.switch_blanking,
         max_settle_s=args.switch_max_settle,
         stage_match_tolerance_mA=args.switch_stage_match_tol,
+        gain=getattr(args, "gain", 1.82),
     )
     frontend_markers = FrontendMarkersConfig(
         stream_start=args.frontend_start_marker,
