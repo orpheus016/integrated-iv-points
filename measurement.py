@@ -8,7 +8,8 @@ try:
 except ImportError:
     SERIAL_AVAILABLE = False
 
-from software.config.config import SimulationConfig
+from software.config.config import SimulationConfig, build_arg_parser, build_simulation_config
+from software.scripts.integrate import FrontendBridge
 
 Q_E = 1.602e-19
 
@@ -21,11 +22,16 @@ def _read_voltage_current_from_serial(port: str = "COM5", baud_rate: int = 9600)
         return 0.0, 0.0, "F"
 
     try:
+        # Initialize the frontend bridge to use BOCD
+        args = build_arg_parser().parse_args([])
+        sim_config = build_simulation_config(args)
+        bridge = FrontendBridge("bocd", sim_config, "software/output/ads1256")
+        
         with serial.Serial(port, baud_rate, timeout=2) as ser:
             deadline = time.monotonic() + 30.0
             stream_started = False
-            voltage_v = 0.0
-            current_a = 0.0
+            last_voltage_v = 0.0
+            last_current_a = 0.0
             status = "F"
 
             while time.monotonic() < deadline:
@@ -47,6 +53,7 @@ def _read_voltage_current_from_serial(port: str = "COM5", baud_rate: int = 9600)
                     stream_started = True
                     status = "STARTSTREAM"
                     deadline = time.monotonic() + 30.0
+                    bridge.on_stream_start()
                     continue
 
                 if upper == "STOPSTREAM":
@@ -58,7 +65,7 @@ def _read_voltage_current_from_serial(port: str = "COM5", baud_rate: int = 9600)
 
                 if upper.startswith("V"):
                     try:
-                        voltage_v = float(text[1:].strip()) / GAIN
+                        last_voltage_v = float(text[1:].strip()) / GAIN
                     except ValueError:
                         pass
                     deadline = time.monotonic() + 30.0
@@ -66,13 +73,22 @@ def _read_voltage_current_from_serial(port: str = "COM5", baud_rate: int = 9600)
 
                 if upper.startswith("I"):
                     try:
-                        current_a = float(text[1:].strip())
+                        last_current_a = float(text[1:].strip())
+                        # I and V are both available, push sample to bridge (with raw voltage)
+                        bridge.on_sample(last_voltage_v * GAIN, last_current_a)
                     except ValueError:
                         pass
                     deadline = time.monotonic() + 30.0
                     continue
 
-        return voltage_v, current_a, status
+            # Stream finished, get the snapshot
+            snapshot = bridge.on_stream_stop()
+            if snapshot is not None:
+                # the snapshot voltage is raw, divide by gain to get real voltage
+                return snapshot.voltage / GAIN, snapshot.current_mA / 1000.0, status
+            else:
+                return last_voltage_v, last_current_a, status
+
     except Exception:
         return 0.0, 0.0, "F"
 
