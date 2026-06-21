@@ -68,6 +68,7 @@ class SerialCommander:
 
     def stop_stream(self) -> None:
         self._write_text(self._config.protocol.stop_command)
+        self.set_stage(0)
 
     def set_stage(self, stage: int) -> None:
         if stage < self._config.protocol.stage_command_min or stage > self._config.protocol.stage_command_max:

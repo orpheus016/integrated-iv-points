@@ -547,6 +547,17 @@ class LoadingPage(QWidget):
         self._stream_active = False
         self._measurement_completed = True
 
+        # Send command to reset current source to 4mA (stage 0)
+        if self._serial_reader is not None:
+            try:
+                self._serial_reader.send_command("i 0")
+            except Exception:
+                try:
+                    self._serial_reader.write(("i 0\n").encode("utf-8"))
+                    self._serial_reader.flush()
+                except Exception:
+                    pass
+
         if not self._manual_mode and len(self.measurement_points) >= self._num_points:
             self.loading_complete.emit()
 
