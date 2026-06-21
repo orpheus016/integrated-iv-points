@@ -405,21 +405,19 @@ class LoadingPage(QWidget):
             pass
 
     def get_temperature_c(self) -> float:
-        # Return the measurement temperature: prefer locked MLX value, fallback to stored temperature
-        if self._wafer_temp_locked and (self._wafer_temp_value is not None):
+        # Return the measurement temperature: prefer MLX value, fallback to stored room temperature
+        if self._wafer_temp_value is not None:
             return float(self._wafer_temp_value)
         return float(self._temperature_c)
 
     def on_mlx_temperature_received(self, temp_c: float):
-        # Capture and lock the first MLX reading for the current measurement run
+        # Continuously update the MLX reading for the current measurement run
         try:
-            if not self._wafer_temp_locked:
-                self._wafer_temp_value = float(temp_c)
-                self._wafer_temp_locked = True
-                # Use MLX value for calculations
-                self._temperature_c = float(self._wafer_temp_value)
-                if hasattr(self, 'wafer_temp_info'):
-                    self.wafer_temp_info.setText(f"Wafer Temp : {self._wafer_temp_value:.1f} C")
+            self._wafer_temp_value = float(temp_c)
+            # Use MLX value for calculations
+            self._temperature_c = float(self._wafer_temp_value)
+            if hasattr(self, 'wafer_temp_info'):
+                self.wafer_temp_info.setText(f"Wafer Temp : {self._wafer_temp_value:.1f} C")
         except Exception:
             pass
 
@@ -630,13 +628,13 @@ class LoadingPage(QWidget):
         self._waiting_for_probe_contact = True
         if hasattr(self, '_end_button'):
             self._end_button.setVisible(True)
-        # Lock wafer temperature to a fixed test value for now
-        self._wafer_temp_locked = True
-        self._wafer_temp_value = 26.85
-        # Ensure calculation temperature matches the locked value
-        self._temperature_c = float(self._wafer_temp_value)
+        # Unlock wafer temperature to allow MLX readings
+        self._wafer_temp_locked = False
+        self._wafer_temp_value = None
+        # Use room temperature as fallback
+        self._temperature_c = float(self._home_room_temp_c)
         if hasattr(self, 'wafer_temp_info'):
-            self.wafer_temp_info.setText(f"Wafer Temp : {self._wafer_temp_value:.2f} C")
+            self.wafer_temp_info.setText("Wafer Temp : -- C")
         if hasattr(self, 'room_temp_info'):
             self.room_temp_info.setText(f"Room Temp : {self._home_room_temp_c:.1f} C")
         # No timer - updates happen in real-time via on_position_received()
