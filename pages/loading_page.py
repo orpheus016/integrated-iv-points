@@ -294,7 +294,7 @@ class LoadingPage(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(18, 0, 18, 0)
         header.setSpacing(12)
-        right_title = QLabel("Real-time Wafer Mapping")
+        right_title = QLabel("Wafer Mapping")
         right_title.setFont(QFont("Segoe UI", 15, QFont.Bold))
         right_title.setStyleSheet(f"color: {TEXT_COLOR};")
         header.addWidget(right_title)
